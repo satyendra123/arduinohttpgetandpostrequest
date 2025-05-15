@@ -24,6 +24,10 @@ EthernetClient client;
 HttpClient http(client, server, 5000);
 
 const char* gateID = "entry_gate1";
+// const char* gateID = "entry_gate2";
+// const char* gateID = "exit_gate1";
+// const char* gateID = "exit_gate2";
+
 unsigned long lastRequestTime = 0;
 const unsigned long requestInterval = 3000;
 
