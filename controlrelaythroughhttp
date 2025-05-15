@@ -1,0 +1,107 @@
+#include <SPI.h>
+#include <Ethernet.h>
+
+#define relayPin 9
+
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+IPAddress ip(192, 168, 1, 157);
+
+EthernetServer server(7000);
+EthernetClient client;
+
+String clientData = "";
+boolean IsClientConnected = false;
+
+unsigned long currentMillis, previousMillis, reconnectMillis;
+const unsigned long healthPacketInterval = 3000;
+const unsigned long reconnectInterval = 5000;
+
+void setup() {
+  Ethernet.begin(mac, ip);
+  server.begin();
+  Serial.begin(9600);
+
+  while (!Serial) {
+    ; // wait for the serial port to connect (for native USB)
+  }
+
+  Serial.print("Machine Gate IP: ");
+  Serial.println(Ethernet.localIP());
+
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, HIGH); // Relay OFF (assuming LOW triggers it)
+
+  IsClientConnected = false;
+}
+
+void connectToServer() {
+  if (client.connect("192.168.1.157", 7000)) {
+    Serial.println("Connected to server.");
+    client.println("Connected to Arduino");
+    IsClientConnected = true;
+  } else {
+    Serial.println("Connection failed, trying again...");
+    IsClientConnected = false;
+  }
+}
+
+void loop() {
+  if (!IsClientConnected) {
+    if (!client.connected()) {
+      client.stop();
+    }
+
+    EthernetClient newClient = server.available();
+    if (newClient) {
+      client = newClient;
+      IsClientConnected = true;
+      client.flush();
+      Serial.println("Client Connected");
+      client.println("Connected to Arduino");
+    }
+  }
+
+  if (IsClientConnected) {
+    if (client.available() > 0) {
+      char thisChar = client.read();
+      if (thisChar == '|') {
+        clientData = "";
+      } else if (thisChar == '%') {
+        Serial.println(clientData);
+        if (clientData.equals("OPENEN")) {
+          Serial.println("Barrier is opening");
+          digitalWrite(relayPin, LOW);
+          delay(500);
+          digitalWrite(relayPin, HIGH);
+          delay(500);
+        }
+      } else {
+        clientData += thisChar;
+      }
+    }
+
+    currentMillis = millis();
+    if (currentMillis - previousMillis >= healthPacketInterval) {
+      previousMillis = currentMillis;
+      if (client.connected()) {
+        client.println("|HLT%");
+      } else {
+        Serial.println("Client disconnected. Attempting to reconnect...");
+        IsClientConnected = false;
+        connectToServer();
+      }
+    }
+
+    if (!client.connected()) {
+      Serial.println("Client Disconnected");
+      IsClientConnected = false;
+      reconnectMillis = millis();
+    }
+
+    if (!IsClientConnected && (millis() - reconnectMillis >= reconnectInterval)) {
+      Serial.println("Attempting to reconnect...");
+      connectToServer();
+      reconnectMillis = millis();
+    }
+  }
+}
