@@ -1,107 +1,81 @@
 #include <SPI.h>
 #include <Ethernet.h>
+#include <EthernetClient.h>
+#include <EthernetHttpClient.h>
 
 #define relayPin 9
-
-byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+// for entry_gate1
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x01};
 IPAddress ip(192, 168, 1, 157);
+// for entry_gate1
+//byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x02};
+//IPAddress ip(192, 168, 1, 158);
+// for entry_gate1
+//byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x03};
+//IPAddress ip(192, 168, 1, 159);
+// for entry_gate1
+//byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0x04};
+//IPAddress ip(192, 168, 1, 160);
 
-EthernetServer server(7000);
+IPAddress server(192, 168, 1, 100);
 EthernetClient client;
+HttpClient http(client, server, 5000);
 
-String clientData = "";
-boolean IsClientConnected = false;
+const char* gateID = "entry_gate1";
+//const char* gateID = "exit_gate1";
+//const char* gateID = "entry_gate2";
+//const char* gateID = "exit_gate2";
 
-unsigned long currentMillis, previousMillis, reconnectMillis;
-const unsigned long healthPacketInterval = 3000;
-const unsigned long reconnectInterval = 5000;
+unsigned long lastRequestTime = 0;
+const unsigned long requestInterval = 3000;
 
 void setup() {
-  Ethernet.begin(mac, ip);
-  server.begin();
   Serial.begin(9600);
 
-  while (!Serial) {
-    ; // wait for the serial port to connect (for native USB)
-  }
+  while (!Serial) { ; }
 
-  Serial.print("Machine Gate IP: ");
+  Ethernet.begin(mac, ip);
+  Serial.print("Local IP: ");
   Serial.println(Ethernet.localIP());
 
   pinMode(relayPin, OUTPUT);
-  digitalWrite(relayPin, HIGH); // Relay OFF (assuming LOW triggers it)
-
-  IsClientConnected = false;
-}
-
-void connectToServer() {
-  if (client.connect("192.168.1.157", 7000)) {
-    Serial.println("Connected to server.");
-    client.println("Connected to Arduino");
-    IsClientConnected = true;
-  } else {
-    Serial.println("Connection failed, trying again...");
-    IsClientConnected = false;
-  }
+  digitalWrite(relayPin, HIGH);  // Relay OFF
 }
 
 void loop() {
-  if (!IsClientConnected) {
-    if (!client.connected()) {
-      client.stop();
-    }
+  unsigned long currentTime = millis();
+  if (currentTime - lastRequestTime >= requestInterval) {
+    lastRequestTime = currentTime;
+    checkBoomSignal();
+  }
+}
 
-    EthernetClient newClient = server.available();
-    if (newClient) {
-      client = newClient;
-      IsClientConnected = true;
-      client.flush();
-      Serial.println("Client Connected");
-      client.println("Connected to Arduino");
-    }
+void checkBoomSignal() {
+  String path = "/check_boomsig?gate_id=" + String(gateID);
+  Serial.print("Sending request to: ");
+  Serial.println(path);
+
+  http.get(path);
+
+  int statusCode = http.responseStatusCode();
+  String response = http.responseBody();
+
+  Serial.print("Response Code: ");
+  Serial.println(statusCode);
+  Serial.print("Response Body: ");
+  Serial.println(response);
+
+  if (statusCode == 200 && response.indexOf("|OPENEN%") >= 0) {
+    triggerBarrier();
   }
 
-  if (IsClientConnected) {
-    if (client.available() > 0) {
-      char thisChar = client.read();
-      if (thisChar == '|') {
-        clientData = "";
-      } else if (thisChar == '%') {
-        Serial.println(clientData);
-        if (clientData.equals("OPENEN")) {
-          Serial.println("Barrier is opening");
-          digitalWrite(relayPin, LOW);
-          delay(500);
-          digitalWrite(relayPin, HIGH);
-          delay(500);
-        }
-      } else {
-        clientData += thisChar;
-      }
-    }
+  http.stop();
+}
 
-    currentMillis = millis();
-    if (currentMillis - previousMillis >= healthPacketInterval) {
-      previousMillis = currentMillis;
-      if (client.connected()) {
-        client.println("|HLT%");
-      } else {
-        Serial.println("Client disconnected. Attempting to reconnect...");
-        IsClientConnected = false;
-        connectToServer();
-      }
-    }
-
-    if (!client.connected()) {
-      Serial.println("Client Disconnected");
-      IsClientConnected = false;
-      reconnectMillis = millis();
-    }
-
-    if (!IsClientConnected && (millis() - reconnectMillis >= reconnectInterval)) {
-      Serial.println("Attempting to reconnect...");
-      connectToServer();
-      reconnectMillis = millis();
-    }
-  }
+void triggerBarrier() {
+  Serial.println("Barrier is opening...");
+  digitalWrite(relayPin, LOW);
+  delay(500);
+  digitalWrite(relayPin, HIGH);
+  delay(500);
 }
