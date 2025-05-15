@@ -80,16 +80,25 @@ from flask import Flask, request, jsonify
 import mysql.connector
 app = Flask(__name__)
 
+gate_mapping = {
+    "entry_gate1": 1,
+    "entry_gate2": 2,
+    "exit_gate1": 3,
+    "exit_gate2": 4,
+}
+
 def get_db_connection():
     conn = mysql.connector.connect(host='localhost', user='root', password='', database='vcd')
     return conn
 
 @app.route('/check_boomsig', methods=['GET'])
 def check_boom_signal():
-    gate_id = request.args.get('gate_id')
+    gate_key = request.args.get('gate_id')
+    gate_id = gate_mapping.get(gate_key)
 
-    if not gate_id:
-        return jsonify({"error": "Missing gate_id parameter"}), 400
+
+    if gate_id is None:
+        return jsonify({"error": "Invalid gate_id"}), 400
 
     try:
         conn = get_db_connection()
